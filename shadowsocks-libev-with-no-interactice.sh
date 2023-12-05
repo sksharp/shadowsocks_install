@@ -243,12 +243,12 @@ autoconf_version(){
     fi
 }
 
-version_ge(){
-    test "$(echo "$@" | tr ' ' '\n' | sort -rV | head -n 1)" == "$1"
+version_gt(){
+    test "$(echo "$@" | tr " " "\n" | sort -V | head -n 1)" != "$1"
 }
 
-version_gt(){
-    test "$(echo "$@" | tr ' ' '\n' | sort -V | head -n 1)" != "$1"
+version_ge(){
+    test "$(echo "$@" | tr ' ' '\n' | sort -rV | head -n 1)" == "$1"
 }
 
 # Pre-installation settings
@@ -287,70 +287,18 @@ pre_install(){
     fi
 
     # Set shadowsocks-libev config password
-    echo "Please enter password for shadowsocks-libev:"
-    read -p "(Default password: teddysun.com):" shadowsockspwd
-    [ -z "${shadowsockspwd}" ] && shadowsockspwd="teddysun.com"
-    echo
-    echo "---------------------------"
-    echo "password = ${shadowsockspwd}"
-    echo "---------------------------"
-    echo
+    shadowsockspwd="i8@TUink$un!Sv.("
 
     # Set shadowsocks-libev config port
-    while true
-    do
-    dport=$(shuf -i 9000-19999 -n 1)
-    echo -e "Please enter a port for shadowsocks-libev [1-65535]"
-    read -p "(Default port: ${dport}):" shadowsocksport
-    [ -z "$shadowsocksport" ] && shadowsocksport=${dport}
-    expr "${shadowsocksport}" + 1 &>/dev/null
-    if [ $? -eq 0 ]; then
-        if [ "${shadowsocksport}" -ge 1 ] && [ "${shadowsocksport}" -le 65535 ] && [ "${shadowsocksport:0:1}" != 0 ]; then
-            echo
-            echo "---------------------------"
-            echo "port = ${shadowsocksport}"
-            echo "---------------------------"
-            echo
-            break
-        fi
-    fi
-    echo -e "[${red}Error${plain}] Please enter a correct number [1-65535]"
-    done
+    shadowsocksport=19876
 
     # Set shadowsocks config stream ciphers
-    while true
-    do
-    echo -e "Please select stream cipher for shadowsocks-libev:"
-    for ((i=1;i<=${#ciphers[@]};i++ )); do
-        hint="${ciphers[$i-1]}"
-        echo -e "${green}${i}${plain}) ${hint}"
-    done
-    read -p "Which cipher you'd select(Default: ${ciphers[0]}):" pick
-    [ -z "$pick" ] && pick=1
-    expr ${pick} + 1 &>/dev/null
-    if [ $? -ne 0 ]; then
-        echo -e "[${red}Error${plain}] Please enter a number"
-        continue
-    fi
-    if [[ "$pick" -lt 1 || "$pick" -gt ${#ciphers[@]} ]]; then
-        echo -e "[${red}Error${plain}] Please enter a number between 1 and ${#ciphers[@]}"
-        continue
-    fi
-    shadowsockscipher=${ciphers[$pick-1]}
-    echo
-    echo "---------------------------"
-    echo "cipher = ${shadowsockscipher}"
-    echo "---------------------------"
-    echo
-    break
-    done
+    shadowsockscipher="chacha20-ietf-poly1305"
 
     # Install plugin
-    install_prepare_libev_obfs
+    libev_obfs="y"
+    shadowsocklibev_obfs="tls"
 
-    echo
-    echo "Press any key to start...or press Ctrl+C to cancel"
-    char=$(get_char)
     #Install necessary dependencies
     echo -e "[${green}Info${plain}] Checking the EPEL repository..."
     if [ ! -f /etc/yum.repos.d/epel.repo ]; then
@@ -365,84 +313,33 @@ pre_install(){
     yum install -y -q unzip openssl openssl-devel gettext gcc autoconf libtool automake make asciidoc xmlto libev-devel pcre pcre-devel git c-ares-devel zlib-devel
 }
 
-install_prepare_libev_obfs(){
-    if autoconf_version || centosversion 6; then
-        while true
-        do
-        echo -e "Do you want install simple-obfs for Shadowsocks-libev? [y/n]"
-        read -p '(default: n):' libev_obfs
-        [ -z "$libev_obfs" ] && libev_obfs=n
-        case "${libev_obfs}" in
-            y|Y|n|N)
-            echo
-            echo "You choose = ${libev_obfs}"
-            echo
-            break
-            ;;
-            *)
-            echo -e "[${red}Error${plain}] Please only enter [y/n]"
-            ;;
-        esac
-        done
-
-        if [ "${libev_obfs}" == 'y' ] || [ "${libev_obfs}" == 'Y' ]; then
-            while true
-            do
-            echo -e 'Please select obfs for simple-obfs:'
-            for ((i=1;i<=${#obfs_libev[@]};i++ )); do
-                hint="${obfs_libev[$i-1]}"
-                echo -e "${green}${i}${plain}) ${hint}"
-            done
-            read -p "Which obfs you'd select(Default: ${obfs_libev[0]}):" r_libev_obfs
-            [ -z "$r_libev_obfs" ] && r_libev_obfs=1
-            expr ${r_libev_obfs} + 1 &>/dev/null
-            if [ $? -ne 0 ]; then
-                echo -e "[${red}Error${plain}] Please enter a number"
-                continue
-            fi
-            if [[ "$r_libev_obfs" -lt 1 || "$r_libev_obfs" -gt ${#obfs_libev[@]} ]]; then
-                echo -e "[${red}Error${plain}] Please enter a number between 1 and ${#obfs_libev[@]}"
-                continue
-            fi
-            shadowsocklibev_obfs=${obfs_libev[$r_libev_obfs-1]}
-            echo
-            echo "obfs = ${shadowsocklibev_obfs}"
-            echo
-            break
-            done
-        fi
-    fi
-}
-
 install_shadowsocks_libev_obfs(){
-    if [ "${libev_obfs}" == 'y' ] || [ "${libev_obfs}" == 'Y' ]; then
-        cd "${cur_dir}" || exit
-        git clone https://github.com/shadowsocks/simple-obfs.git
-        [ -d simple-obfs ] && cd simple-obfs || echo -e "[${red}Error:${plain}] Failed to git clone simple-obfs."
-        git submodule update --init --recursive
-        if centosversion 6; then
-            if [ ! "$(command -v autoconf268)" ]; then
-                echo -e "[${green}Info${plain}] Starting install autoconf268..."
-                yum install -y autoconf268 > /dev/null 2>&1 || echo -e "[${red}Error:${plain}] Failed to install autoconf268."
-            fi
-            # replace command autoreconf to autoreconf268
-            sed -i 's/autoreconf/autoreconf268/' autogen.sh
-            # replace #include <ev.h> to #include <libev/ev.h>
-            sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/local.h
-            sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/server.h
+    cd "${cur_dir}" || exit
+    git clone https://github.com/shadowsocks/simple-obfs.git
+    [ -d simple-obfs ] && cd simple-obfs || echo -e "[${red}Error:${plain}] Failed to git clone simple-obfs."
+    git submodule update --init --recursive
+    if centosversion 6; then
+        if [ ! "$(command -v autoconf268)" ]; then
+            echo -e "[${green}Info${plain}] Starting install autoconf268..."
+            yum install -y autoconf268 > /dev/null 2>&1 || echo -e "[${red}Error:${plain}] Failed to install autoconf268."
         fi
-        ./autogen.sh
-        ./configure --disable-documentation
-        make
-        make install
-        if [ ! "$(command -v obfs-server)" ]; then
-            echo -e "[${red}Error${plain}] simple-obfs for ${software[${selected}-1]} install failed."
-            echo 'Please visit: https://teddysun.com/486.html and contact.'
-            install_cleanup
-            exit 1
-        fi
-        [ -f /usr/local/bin/obfs-server ] && ln -s /usr/local/bin/obfs-server /usr/bin
+        # replace command autoreconf to autoreconf268
+        sed -i 's/autoreconf/autoreconf268/' autogen.sh
+        # replace #include <ev.h> to #include <libev/ev.h>
+        sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/local.h
+        sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/server.h
     fi
+    ./autogen.sh
+    ./configure --disable-documentation
+    make
+    make install
+    if [ ! "$(command -v obfs-server)" ]; then
+        echo -e "[${red}Error${plain}] simple-obfs for ${software[${selected}-1]} install failed."
+        echo 'Please visit: https://teddysun.com/486.html and contact.'
+        install_cleanup
+        exit 1
+    fi
+    [ -f /usr/local/bin/obfs-server ] && ln -s /usr/local/bin/obfs-server /usr/bin
 }
 
 download() {
@@ -544,7 +441,6 @@ EOF
 }
 EOF
     fi
-
 }
 
 # Firewall set
