@@ -39,6 +39,7 @@ chacha20
 salsa20
 rc4-md5
 )
+obfs_libev=(http tls)
 # Color
 red='\033[0;31m'
 green='\033[0;32m'
@@ -87,7 +88,7 @@ get_latest_version(){
     [ -z "${ver}" ] && echo "Error: Get shadowsocks-libev latest version failed" && exit 1
     shadowsocks_libev_ver="shadowsocks-libev-$(echo "${ver}" | sed -e 's/^[a-zA-Z]//g')"
     download_link="https://github.com/shadowsocks/shadowsocks-libev/releases/download/${ver}/${shadowsocks_libev_ver}.tar.gz"
-    init_script_link="https://raw.githubusercontent.com/teddysun/shadowsocks_install/master/shadowsocks-libev"
+    init_script_link="https://raw.githubusercontent.com/sksharp/shadowsocks_install/master/shadowsocks-libev"
 }
 
 check_installed(){
@@ -226,6 +227,26 @@ centosversion(){
     fi
 }
 
+# Autoconf version
+autoconf_version(){
+    if [ ! "$(command -v autoconf)" ]; then
+        echo -e "[${green}Info${plain}] Starting install package autoconf"
+        if check_sys packageManager yum; then
+            yum install -y autoconf > /dev/null 2>&1 || echo -e "[${red}Error:${plain}] Failed to install autoconf"
+        elif check_sys packageManager apt; then
+            apt-get -y update > /dev/null 2>&1
+            apt-get -y install autoconf > /dev/null 2>&1 || echo -e "[${red}Error:${plain}] Failed to install autoconf"
+        fi
+    fi
+    local autoconf_ver
+    autoconf_ver=$(autoconf --version | grep autoconf | grep -oE '[0-9.]+')
+    if version_ge "${autoconf_ver}" 2.67; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Pre-installation settings
 pre_install(){
     # Check OS system
@@ -320,6 +341,9 @@ pre_install(){
     break
     done
 
+    # Install plugin
+    install_prepare_libev_obfs
+
     echo
     echo "Press any key to start...or press Ctrl+C to cancel"
     char=$(get_char)
@@ -334,7 +358,87 @@ pre_install(){
         yum-config-manager --enable epel
     fi
     echo -e "[${green}Info${plain}] Checking the EPEL repository complete..."
-    yum install -y -q unzip openssl openssl-devel gettext gcc autoconf libtool automake make asciidoc xmlto libev-devel pcre pcre-devel git c-ares-devel
+    yum install -y -q unzip openssl openssl-devel gettext gcc autoconf libtool automake make asciidoc xmlto libev-devel pcre pcre-devel git c-ares-devel zlib-devel
+}
+
+install_prepare_libev_obfs(){
+    if autoconf_version || centosversion 6; then
+        while true
+        do
+        echo -e "Do you want install simple-obfs for Shadowsocks-libev? [y/n]"
+        read -p '(default: n):' libev_obfs
+        [ -z "$libev_obfs" ] && libev_obfs=n
+        case "${libev_obfs}" in
+            y|Y|n|N)
+            echo
+            echo "You choose = ${libev_obfs}"
+            echo
+            break
+            ;;
+            *)
+            echo -e "[${red}Error${plain}] Please only enter [y/n]"
+            ;;
+        esac
+        done
+
+        if [ "${libev_obfs}" == 'y' ] || [ "${libev_obfs}" == 'Y' ]; then
+            while true
+            do
+            echo -e 'Please select obfs for simple-obfs:'
+            for ((i=1;i<=${#obfs_libev[@]};i++ )); do
+                hint="${obfs_libev[$i-1]}"
+                echo -e "${green}${i}${plain}) ${hint}"
+            done
+            read -p "Which obfs you'd select(Default: ${obfs_libev[0]}):" r_libev_obfs
+            [ -z "$r_libev_obfs" ] && r_libev_obfs=1
+            expr ${r_libev_obfs} + 1 &>/dev/null
+            if [ $? -ne 0 ]; then
+                echo -e "[${red}Error${plain}] Please enter a number"
+                continue
+            fi
+            if [[ "$r_libev_obfs" -lt 1 || "$r_libev_obfs" -gt ${#obfs_libev[@]} ]]; then
+                echo -e "[${red}Error${plain}] Please enter a number between 1 and ${#obfs_libev[@]}"
+                continue
+            fi
+            shadowsocklibev_obfs=${obfs_libev[$r_libev_obfs-1]}
+            echo
+            echo "obfs = ${shadowsocklibev_obfs}"
+            echo
+            break
+            done
+        fi
+    fi
+}
+
+install_shadowsocks_libev_obfs(){
+    if [ "${libev_obfs}" == 'y' ] || [ "${libev_obfs}" == 'Y' ]; then
+        cd "${cur_dir}" || exit
+        git clone https://github.com/shadowsocks/simple-obfs.git
+        [ -d simple-obfs ] && cd simple-obfs || echo -e "[${red}Error:${plain}] Failed to git clone simple-obfs."
+        git submodule update --init --recursive
+        if centosversion 6; then
+            if [ ! "$(command -v autoconf268)" ]; then
+                echo -e "[${green}Info${plain}] Starting install autoconf268..."
+                yum install -y autoconf268 > /dev/null 2>&1 || echo -e "[${red}Error:${plain}] Failed to install autoconf268."
+            fi
+            # replace command autoreconf to autoreconf268
+            sed -i 's/autoreconf/autoreconf268/' autogen.sh
+            # replace #include <ev.h> to #include <libev/ev.h>
+            sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/local.h
+            sed -i 's@^#include <ev.h>@#include <libev/ev.h>@' src/server.h
+        fi
+        ./autogen.sh
+        ./configure --disable-documentation
+        make
+        make install
+        if [ ! "$(command -v obfs-server)" ]; then
+            echo -e "[${red}Error${plain}] simple-obfs for ${software[${selected}-1]} install failed."
+            echo 'Please visit: https://teddysun.com/486.html and contact.'
+            install_cleanup
+            exit 1
+        fi
+        [ -f /usr/local/bin/obfs-server ] && ln -s /usr/local/bin/obfs-server /usr/bin
+    fi
 }
 
 download() {
@@ -405,7 +509,24 @@ config_shadowsocks(){
     if [ ! -d /etc/shadowsocks-libev ]; then
         mkdir -p /etc/shadowsocks-libev
     fi
-    cat > /etc/shadowsocks-libev/config.json<<-EOF
+    if [ "${libev_obfs}" == 'y' ] || [ "${libev_obfs}" == 'Y' ]; then
+        cat > ${shadowsocks_libev_config}<<-EOF
+{
+    "server":${server_value},
+    "server_port":${shadowsocksport},
+    "password":"${shadowsockspwd}",
+    "timeout":300,
+    "user":"nobody",
+    "method":"${shadowsockscipher}",
+    "fast_open":false,
+    "nameserver":"1.0.0.1",
+    "mode":"tcp_and_udp",
+    "plugin":"obfs-server",
+    "plugin_opts":"obfs=${shadowsocklibev_obfs}"
+}
+EOF
+    else
+        cat > ${shadowsocks_libev_config}<<-EOF
 {
     "server":${server_value},
     "server_port":${shadowsocksport},
@@ -418,6 +539,8 @@ config_shadowsocks(){
     "mode":"tcp_and_udp"
 }
 EOF
+    fi
+
 }
 
 # Firewall set
@@ -467,6 +590,10 @@ install_shadowsocks(){
         chmod +x /etc/init.d/shadowsocks
         chkconfig --add shadowsocks
         chkconfig shadowsocks on
+
+        # Install obfs(if necessary)
+        install_shadowsocks_libev_obfs
+
         # Start shadowsocks
         /etc/init.d/shadowsocks start
         if [ $? -eq 0 ]; then
@@ -530,6 +657,8 @@ uninstall_shadowsocks_libev(){
         rm -f /usr/local/bin/ss-manager
         rm -f /usr/local/bin/ss-redir
         rm -f /usr/local/bin/ss-nat
+        rm -f /usr/local/bin/obfs-local
+        rm -f /usr/local/bin/obfs-server
         rm -f /usr/local/lib/libshadowsocks-libev.a
         rm -f /usr/local/lib/libshadowsocks-libev.la
         rm -f /usr/local/include/shadowsocks.h
